@@ -65,6 +65,8 @@ class Event {
       this.recurrenceRule,
       this.reminders,
       this.availability,
+      this.url,
+      this.location,
       this.allDay = false});
 
   Event.fromJson(Map<String, dynamic> json) {
@@ -109,11 +111,7 @@ class Event {
       // Getting and setting an organiser for iOS
       var organiser = Attendee.fromJson(json['organizer']);
 
-      var attendee = attendees.firstWhere(
-          (at) =>
-              at.name == organiser.name &&
-              at.emailAddress == organiser.emailAddress,
-          orElse: () => null);
+      var attendee = attendees.firstWhere((at) => at.name == organiser.name && at.emailAddress == organiser.emailAddress, orElse: () => null);
       if (attendee != null) {
         attendee.isOrganiser = true;
       }
@@ -138,7 +136,7 @@ class Event {
     data['eventEndTimeZone'] = endTimeZone;
     data['eventAllDay'] = allDay;
     data['eventLocation'] = location;
-    data['eventURL'] = url?.data?.contentText;
+    data['eventURL'] = url?.toString();
     data['availability'] = availability.enumToString;
 
     if (attendees != null) {

@@ -121,13 +121,13 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin {
     let calendarColorArgument = "calendarColor"
     let availabilityArgument = "availability"
     let validFrequencyTypes = [EKRecurrenceFrequency.daily, EKRecurrenceFrequency.weekly, EKRecurrenceFrequency.monthly, EKRecurrenceFrequency.yearly]
-    
+
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: channelName, binaryMessenger: registrar.messenger())
         let instance = SwiftDeviceCalendarPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
-    
+
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case requestPermissionsMethod:
@@ -150,44 +150,60 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin {
             result(FlutterMethodNotImplemented)
         }
     }
-    
+
     private func hasPermissions(_ result: FlutterResult) {
         let hasPermissions = hasEventPermissions()
         result(hasPermissions)
     }
-    
+
+    private func getBestSource() -> EKSource? {
+        let iCloudSource = eventStore.sources.filter { $0.sourceType == .calDAV && $0.title == "iCloud" }
+        if (!iCloudSource.isEmpty) {
+            return iCloudSource.first
+            print("Calendar source set to iCloud")
+        }
+
+        let localSources = eventStore.sources.filter { $0.sourceType == .local }
+
+        if (!localSources.isEmpty) {
+            print("Calendar source set to first local source")
+            return localSources.first
+        }
+
+        return eventStore.defaultCalendarForNewEvents?.source
+    }
+
     private func createCalendar(_ call: FlutterMethodCall, _ result: FlutterResult) {
         let arguments = call.arguments as! Dictionary<String, AnyObject>
         let calendar = EKCalendar.init(for: EKEntityType.event, eventStore: eventStore)
         do {
             calendar.title = arguments[calendarNameArgument] as! String
             let calendarColor = arguments[calendarColorArgument] as? String
-            
+
             if (calendarColor != nil) {
                 calendar.cgColor = UIColor(hex: calendarColor!)?.cgColor
             }
             else {
                 calendar.cgColor = UIColor(red: 255, green: 0, blue: 0, alpha: 0).cgColor // Red colour as a default
             }
-            
-            let localSources = eventStore.sources.filter { $0.sourceType == .local }
-            
-            if (!localSources.isEmpty) {
-                calendar.source = localSources.first
-                
-                try eventStore.saveCalendar(calendar, commit: true)
-                result(calendar.calendarIdentifier)
+
+            guard let source = getBestSource() else {
+                result(FlutterError(code: self.genericError, message: "None of iCloud, Local nor Default calendar source were found.", details: nil))
+                return
             }
-            else {
-                result(FlutterError(code: self.genericError, message: "Local calendar was not found.", details: nil))
-            }
+
+            calendar.source = source
+
+            try eventStore.saveCalendar(calendar, commit: true)
+            result(calendar.calendarIdentifier)
         }
         catch {
             eventStore.reset()
+            print("Error setting event store, \(error.localizedDescription)")
             result(FlutterError(code: self.genericError, message: error.localizedDescription, details: nil))
         }
     }
-    
+
     private func retrieveCalendars(_ result: @escaping FlutterResult) {
         checkPermissionsThenExecute(permissionsGrantedAction: {
             let ekCalendars = self.eventStore.calendars(for: .event)
