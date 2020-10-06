@@ -10,12 +10,12 @@ class Event {
     var end: Long? = null
     var startTimeZone: String? = null
     var endTimeZone: String? = null
-    var allDay: Boolean = false
+    var allDay: Boolean? = null
     var location: String? = null
     var url: String? = null
-    var attendees: MutableList<Attendee> = mutableListOf()
+    var attendees: MutableList<Attendee>? = null
     var recurrenceRule: RecurrenceRule? = null
     var organizer: Attendee? = null
-    var reminders: MutableList<Reminder> = mutableListOf()
+    var reminders: MutableList<Reminder>? = null
     var availability: Availability? = null
 }

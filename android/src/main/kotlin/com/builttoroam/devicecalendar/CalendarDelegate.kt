@@ -60,6 +60,7 @@ import com.builttoroam.devicecalendar.common.ErrorMessages
 import com.builttoroam.devicecalendar.common.ErrorMessages.Companion.CALENDAR_ID_INVALID_ARGUMENT_NOT_A_NUMBER_MESSAGE
 import com.builttoroam.devicecalendar.common.ErrorMessages.Companion.CREATE_EVENT_ARGUMENTS_NOT_VALID_MESSAGE
 import com.builttoroam.devicecalendar.common.ErrorMessages.Companion.EVENT_ID_CANNOT_BE_NULL_ON_DELETION_MESSAGE
+import com.builttoroam.devicecalendar.common.ErrorMessages.Companion.EVENT_ID_CANNOT_BE_NULL_ON_UPDATE_MESSAGE
 import com.builttoroam.devicecalendar.common.ErrorMessages.Companion.NOT_AUTHORIZED_MESSAGE
 import com.builttoroam.devicecalendar.common.RecurrenceFrequency
 import com.builttoroam.devicecalendar.models.*
@@ -80,8 +81,9 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
     private val RETRIEVE_CALENDARS_REQUEST_CODE = 0
     private val RETRIEVE_EVENTS_REQUEST_CODE = RETRIEVE_CALENDARS_REQUEST_CODE + 1
     private val RETRIEVE_CALENDAR_REQUEST_CODE = RETRIEVE_EVENTS_REQUEST_CODE + 1
-    private val CREATE_OR_UPDATE_EVENT_REQUEST_CODE = RETRIEVE_CALENDAR_REQUEST_CODE + 1
-    private val DELETE_EVENT_REQUEST_CODE = CREATE_OR_UPDATE_EVENT_REQUEST_CODE + 1
+    private val CREATE_EVENT_REQUEST_CODE = RETRIEVE_CALENDAR_REQUEST_CODE + 1
+    private val UPDATE_EVENT_REQUEST_CODE = CREATE_EVENT_REQUEST_CODE + 1
+    private val DELETE_EVENT_REQUEST_CODE = UPDATE_EVENT_REQUEST_CODE + 1
     private val REQUEST_PERMISSIONS_REQUEST_CODE = DELETE_EVENT_REQUEST_CODE + 1
     private val PART_TEMPLATE = ";%s="
     private val BYMONTHDAY_PART = "BYMONTHDAY"
@@ -132,8 +134,11 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
                 RETRIEVE_CALENDAR_REQUEST_CODE -> {
                     retrieveCalendar(cachedValues.calendarId, cachedValues.pendingChannelResult)
                 }
-                CREATE_OR_UPDATE_EVENT_REQUEST_CODE -> {
-                    createOrUpdateEvent(cachedValues.calendarId, cachedValues.event, cachedValues.pendingChannelResult)
+                CREATE_EVENT_REQUEST_CODE -> {
+                    createEvent(cachedValues.calendarId, cachedValues.event, cachedValues.pendingChannelResult)
+                }
+                UPDATE_EVENT_REQUEST_CODE -> {
+                    updateEvent(cachedValues.calendarId, cachedValues.event, cachedValues.pendingChannelResult)
                 }
                 DELETE_EVENT_REQUEST_CODE -> {
                     deleteEvent(cachedValues.eventId, cachedValues.calendarId, cachedValues.pendingChannelResult)
@@ -329,7 +334,7 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
         return
     }
 
-    fun createOrUpdateEvent(calendarId: String, event: Event?, pendingChannelResult: MethodChannel.Result) {
+    fun createEvent(calendarId: String, event: Event?, pendingChannelResult: MethodChannel.Result) {
         if (arePermissionsGranted()) {
             if (event == null) {
                 finishWithError(GENERIC_ERROR, CREATE_EVENT_ARGUMENTS_NOT_VALID_MESSAGE, pendingChannelResult)
@@ -352,28 +357,71 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
             }
 
             val job: Job
-            var eventId: Long? = event.eventId?.toLongOrNull()
-            if (eventId == null) {
-                val uri = contentResolver?.insert(Events.CONTENT_URI, values)
-                // get the event ID that is the last element in the Uri
-                eventId = java.lang.Long.parseLong(uri?.lastPathSegment!!)
-                job = GlobalScope.launch(Dispatchers.IO + exceptionHandler) {
-                    insertAttendees(event.attendees, eventId, contentResolver)
-                    insertReminders(event.reminders, eventId, contentResolver)
-                }
-            } else {
-                job = GlobalScope.launch(Dispatchers.IO + exceptionHandler) {
-                    contentResolver?.update(ContentUris.withAppendedId(Events.CONTENT_URI, eventId), values, null, null)
-                    val existingAttendees = retrieveAttendees(eventId.toString(), contentResolver)
-                    val attendeesToDelete = if (event.attendees.isNotEmpty()) existingAttendees.filter { existingAttendee -> event.attendees.all { it.emailAddress != existingAttendee.emailAddress } } else existingAttendees
-                    for (attendeeToDelete in attendeesToDelete) {
-                        deleteAttendee(eventId, attendeeToDelete, contentResolver)
+            var eventId: Long?
+            val uri = contentResolver?.insert(Events.CONTENT_URI, values)
+            // get the event ID that is the last element in the Uri
+            eventId = java.lang.Long.parseLong(uri?.lastPathSegment!!)
+            job = GlobalScope.launch(Dispatchers.IO + exceptionHandler) {
+                insertAttendees(event.attendees!!, eventId, contentResolver)
+                insertReminders(event.reminders!!, eventId, contentResolver)
+            }
+            job.invokeOnCompletion {
+                cause ->
+                if (cause == null) {
+                    _registrar!!.activity().runOnUiThread {
+                        finishWithSuccess(eventId.toString(), pendingChannelResult)
                     }
+                }
+            }
+        } else {
+            val parameters = CalendarMethodsParametersCacheModel(pendingChannelResult, CREATE_EVENT_REQUEST_CODE, calendarId)
+            parameters.event = event
+            requestPermissions(parameters)
+        }
+    }
 
-                    val attendeesToInsert = event.attendees.filter { existingAttendees.all { existingAttendee -> existingAttendee.emailAddress != it.emailAddress } }
-                    insertAttendees(attendeesToInsert, eventId, contentResolver)
-                    deleteExistingReminders(contentResolver, eventId)
-                    insertReminders(event.reminders, eventId, contentResolver!!)
+    fun updateEvent(calendarId: String, event: Event?, pendingChannelResult: MethodChannel.Result) {
+        if (arePermissionsGranted()) {
+            if (event == null) {
+                finishWithError(GENERIC_ERROR, CREATE_EVENT_ARGUMENTS_NOT_VALID_MESSAGE, pendingChannelResult)
+                return
+            }
+
+            if (event.eventId == null) {
+                finishWithError(GENERIC_ERROR, EVENT_ID_CANNOT_BE_NULL_ON_UPDATE_MESSAGE, pendingChannelResult)
+                return
+            }
+
+            val calendar = retrieveCalendar(calendarId, pendingChannelResult, true)
+            if (calendar == null) {
+                finishWithError(NOT_FOUND, "Couldn't retrieve the Calendar with ID $calendarId", pendingChannelResult)
+                return
+            }
+
+            val contentResolver: ContentResolver? = _context?.contentResolver
+            val values = buildEventContentValues(event, calendarId)
+
+            val exceptionHandler = CoroutineExceptionHandler { _, exception ->
+                _registrar!!.activity().runOnUiThread {
+                    finishWithError(GENERIC_ERROR, exception.message, pendingChannelResult)
+                }
+            }
+
+            val job: Job
+            val eventId: Long = event.eventId!!.toLong()
+            job = GlobalScope.launch(Dispatchers.IO + exceptionHandler) {
+                contentResolver?.update(ContentUris.withAppendedId(Events.CONTENT_URI, eventId), values, null, null)
+                val existingAttendees = retrieveAttendees(eventId.toString(), contentResolver)
+                val attendeesToDelete = if (event.attendees.isNotEmpty()) existingAttendees.filter { existingAttendee -> event.attendees.all { it.emailAddress != existingAttendee.emailAddress } } else existingAttendees
+                for (attendeeToDelete in attendeesToDelete) {
+                    deleteAttendee(eventId, attendeeToDelete, contentResolver)
+                }
+
+                val attendeesToInsert = event.attendees.filter { existingAttendees.all { existingAttendee -> existingAttendee.emailAddress != it.emailAddress } }
+                insertAttendees(attendeesToInsert, eventId, contentResolver)
+                deleteExistingReminders(contentResolver, eventId)
+                event.reminders?.let { reminders ->
+                    insertReminders(reminders, eventId, contentResolver!!)
                 }
             }
             job.invokeOnCompletion {
@@ -385,7 +433,7 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
                 }
             }
         } else {
-            val parameters = CalendarMethodsParametersCacheModel(pendingChannelResult, CREATE_OR_UPDATE_EVENT_REQUEST_CODE, calendarId)
+            val parameters = CalendarMethodsParametersCacheModel(pendingChannelResult, UPDATE_EVENT_REQUEST_CODE, calendarId)
             parameters.event = event
             requestPermissions(parameters)
         }
@@ -428,7 +476,7 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
         val duration: String? = null
         values.put(Events.ALL_DAY, event.allDay)
 
-        if (event.allDay) {
+        if (event.allDay!!) {
             val calendar = java.util.Calendar.getInstance()
             calendar.timeInMillis = event.start!!
             calendar.set(java.util.Calendar.HOUR, 0)
@@ -462,6 +510,80 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
             val recurrenceRuleParams = buildRecurrenceRuleParams(event.recurrenceRule!!)
             values.put(Events.RRULE, recurrenceRuleParams)
         }
+        return values
+    }
+
+    private fun buildEventContentValuesIfNotNull(event: Event, calendarId: String): ContentValues {
+        val values = ContentValues()
+        val duration: String? = null
+        event.allDay?.let { allDay ->
+            values.put(Events.ALL_DAY, event.allDay)
+        }
+
+        if (event.allDay == true) {
+            event.start?.let { start ->
+                val calendar = java.util.Calendar.getInstance()
+                calendar.timeInMillis = start
+                calendar.set(java.util.Calendar.HOUR, 0)
+                calendar.set(java.util.Calendar.MINUTE, 0)
+                calendar.set(java.util.Calendar.SECOND, 0)
+                calendar.set(java.util.Calendar.MILLISECOND, 0)
+
+                // All day events must have UTC timezone
+                val utcTimeZone = TimeZone.getTimeZone("UTC")
+                calendar.timeZone = utcTimeZone
+
+                values.put(Events.DTSTART, calendar.timeInMillis)
+                values.put(Events.DTEND, calendar.timeInMillis)
+                values.put(Events.EVENT_TIMEZONE, utcTimeZone.id)
+            }
+        } else {
+            event.start?.let { start ->
+                values.put(Events.DTSTART, start)
+            }
+            event.startTimeZone?.let { startTimeZone ->
+                values.put(Events.EVENT_TIMEZONE, getTimeZone(startTimeZone).id)
+            }
+
+            event.end?.let { end ->
+                values.put(Events.DTEND, end)
+            }
+            event.endTimeZone?.let { endTimeZone ->
+                values.put(Events.EVENT_END_TIMEZONE, getTimeZone(endTimeZone).id)
+            }
+        }
+
+        event.title?.let { title ->
+            values.put(Events.TITLE, title)
+        }
+
+        event.description?.let { description ->
+            values.put(Events.DESCRIPTION, description)
+        }
+
+        event.location?.let { location ->
+            values.put(Events.EVENT_LOCATION, location)
+        }
+
+        event.url?.let { url ->
+            values.put(Events.CUSTOM_APP_URI, url)
+        }
+
+        event.calendarId?.let { calendarId ->
+            values.put(Events.CALENDAR_ID, calendarId)
+        }
+
+        values.put(Events.DURATION, duration)
+
+        event.availability?.let { availability ->
+            values.put(Events.AVAILABILITY, getAvailability(availability))
+        }
+
+        event.recurrenceRule?.let { recurrenceRule ->
+            val recurrenceRuleParams = buildRecurrenceRuleParams(recurrenceRule)
+            values.put(Events.RRULE, recurrenceRuleParams)
+        }
+
         return values
     }
 

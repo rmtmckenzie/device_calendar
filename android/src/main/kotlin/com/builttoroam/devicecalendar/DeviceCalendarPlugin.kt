@@ -21,7 +21,8 @@ class DeviceCalendarPlugin() : MethodCallHandler {
     private val RETRIEVE_EVENTS_METHOD = "retrieveEvents"
     private val DELETE_EVENT_METHOD = "deleteEvent"
     private val DELETE_EVENT_INSTANCE_METHOD = "deleteEventInstance"
-    private val CREATE_OR_UPDATE_EVENT_METHOD = "createOrUpdateEvent"
+    private val CREATE_EVENT_METHOD = "createEvent"
+    private val UPDATE_EVENT_METHOD = "updateEvent"
     private val CREATE_CALENDAR_METHOD = "createCalendar"
 
     // Method arguments
@@ -102,11 +103,18 @@ class DeviceCalendarPlugin() : MethodCallHandler {
 
                 _calendarDelegate.retrieveEvents(calendarId!!, startDate, endDate, eventIds, result)
             }
-            CREATE_OR_UPDATE_EVENT_METHOD -> {
+            CREATE_EVENT_METHOD -> {
+                val calendarId = call.argument<String>(CALENDAR_ID_ARGUMENT)
+                val event = parseEventArgs(call, calendarId)
+                setEventArgsDefaults(event)
+
+                _calendarDelegate.createEvent(calendarId!!, event, result)
+            }
+            UPDATE_EVENT_METHOD -> {
                 val calendarId = call.argument<String>(CALENDAR_ID_ARGUMENT)
                 val event = parseEventArgs(call, calendarId)
 
-                _calendarDelegate.createOrUpdateEvent(calendarId!!, event, result)
+                _calendarDelegate.updateEvent(calendarId!!, event, result)
             }
             DELETE_EVENT_METHOD -> {
                 val calendarId = call.argument<String>(CALENDAR_ID_ARGUMENT)
@@ -142,9 +150,9 @@ class DeviceCalendarPlugin() : MethodCallHandler {
         event.calendarId = calendarId
         event.eventId = call.argument<String>(EVENT_ID_ARGUMENT)
         event.description = call.argument<String>(EVENT_DESCRIPTION_ARGUMENT)
-        event.allDay = call.argument<Boolean>(EVENT_ALL_DAY_ARGUMENT) ?: false
-        event.start = call.argument<Long>(EVENT_START_DATE_ARGUMENT)!!
-        event.end = call.argument<Long>(EVENT_END_DATE_ARGUMENT)!!
+        event.allDay = call.argument<Boolean>(EVENT_ALL_DAY_ARGUMENT)
+        event.start = call.argument<Long>(EVENT_START_DATE_ARGUMENT)
+        event.end = call.argument<Long>(EVENT_END_DATE_ARGUMENT)
         event.startTimeZone = call.argument<String>(EVENT_START_TIMEZONE_ARGUMENT)
         event.endTimeZone = call.argument<String>(EVENT_END_TIMEZONE_ARGUMENT)
         event.location = call.argument<String>(EVENT_LOCATION_ARGUMENT)
@@ -157,26 +165,37 @@ class DeviceCalendarPlugin() : MethodCallHandler {
         }
 
         if (call.hasArgument(ATTENDEES_ARGUMENT) && call.argument<List<Map<String, Any>>>(ATTENDEES_ARGUMENT) != null) {
-            event.attendees = mutableListOf()
+            val attendees = mutableListOf<Attendee>()
             val attendeesArgs = call.argument<List<Map<String, Any>>>(ATTENDEES_ARGUMENT)!!
             for (attendeeArgs in attendeesArgs) {
-                event.attendees.add(Attendee(
+                attendees.add(Attendee(
                         attendeeArgs[EMAIL_ADDRESS_ARGUMENT] as String,
                         attendeeArgs[NAME_ARGUMENT] as String?,
                         attendeeArgs[ROLE_ARGUMENT] as Int,
                         null, null))
             }
+            event.attendees = attendees
         }
 
         if (call.hasArgument(REMINDERS_ARGUMENT) && call.argument<List<Map<String, Any>>>(REMINDERS_ARGUMENT) != null) {
-            event.reminders = mutableListOf()
+            val reminders = mutableListOf<Reminder>()
             val remindersArgs = call.argument<List<Map<String, Any>>>(REMINDERS_ARGUMENT)!!
             for (reminderArgs in remindersArgs) {
-                event.reminders.add(Reminder(reminderArgs[MINUTES_ARGUMENT] as Int))
+                reminders.add(Reminder(reminderArgs[MINUTES_ARGUMENT] as Int))
             }
+            event.reminders = reminders
         }
 
         return event
+    }
+
+    private fun setEventArgsDefaults(event: Event) {
+        // This sets the defaults and checks for nulls as expected by the create function
+        event.allDay = event.allDay ?: false;
+        event.start = event.start!!
+        event.end = event.end!!
+        event.attendees = event.attendees ?: mutableListOf()
+        event.reminders = event.reminders ?: mutableListOf()
     }
 
     private fun parseRecurrenceRuleArgs(call: MethodCall): RecurrenceRule {
