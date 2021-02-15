@@ -114,9 +114,9 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
         }
 
         val cachedValues: CalendarMethodsParametersCacheModel = _cachedParametersMap[requestCode]
-          ?: // unlikely scenario where another plugin is potentially using the same request code but it's not one we are tracking so return to
-          // indicate we're not handling the request
-          return false
+                ?: // unlikely scenario where another plugin is potentially using the same request code but it's not one we are tracking so return to
+                // indicate we're not handling the request
+                return false
 
         try {
             if (!permissionGranted) {
@@ -246,10 +246,10 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
 
         var uri = CalendarContract.Calendars.CONTENT_URI
         uri = uri.buildUpon()
-          .appendQueryParameter(CALLER_IS_SYNCADAPTER, "true")
-          .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, localAccountName)
-          .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL)
-          .build()
+                .appendQueryParameter(CALLER_IS_SYNCADAPTER, "true")
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, localAccountName)
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL)
+                .build()
         val values = ContentValues()
         values.put(CalendarContract.Calendars.NAME, calendarName)
         values.put(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, calendarName)
@@ -365,8 +365,7 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
                 insertAttendees(event.attendees!!, eventId, contentResolver)
                 insertReminders(event.reminders!!, eventId, contentResolver)
             }
-            job.invokeOnCompletion {
-                cause ->
+            job.invokeOnCompletion { cause ->
                 if (cause == null) {
                     _registrar!!.activity().runOnUiThread {
                         finishWithSuccess(eventId.toString(), pendingChannelResult)
@@ -412,20 +411,20 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
             job = GlobalScope.launch(Dispatchers.IO + exceptionHandler) {
                 contentResolver?.update(ContentUris.withAppendedId(Events.CONTENT_URI, eventId), values, null, null)
                 val existingAttendees = retrieveAttendees(eventId.toString(), contentResolver)
-                val attendeesToDelete = if (event.attendees.isNotEmpty()) existingAttendees.filter { existingAttendee -> event.attendees.all { it.emailAddress != existingAttendee.emailAddress } } else existingAttendees
-                for (attendeeToDelete in attendeesToDelete) {
-                    deleteAttendee(eventId, attendeeToDelete, contentResolver)
-                }
+                val eventAttendees = (if (event.attendees != null) event.attendees else emptyList<Attendee>())!!
 
-                val attendeesToInsert = event.attendees.filter { existingAttendees.all { existingAttendee -> existingAttendee.emailAddress != it.emailAddress } }
+                val attendeesToDelete = existingAttendees.filter { existingAttendee -> eventAttendees.all { newAttendee -> newAttendee.emailAddress != existingAttendee.emailAddress } }
+                val attendeesToInsert = eventAttendees.filter { eventAttendee -> existingAttendees.all { existingAttendee -> existingAttendee.emailAddress != eventAttendee.emailAddress } }
+
+                deleteAttendees(attendeesToDelete, eventId, contentResolver)
                 insertAttendees(attendeesToInsert, eventId, contentResolver)
+
                 deleteExistingReminders(contentResolver, eventId)
                 event.reminders?.let { reminders ->
                     insertReminders(reminders, eventId, contentResolver!!)
                 }
             }
-            job.invokeOnCompletion {
-                cause ->
+            job.invokeOnCompletion { cause ->
                 if (cause == null) {
                     _registrar!!.activity().runOnUiThread {
                         finishWithSuccess(eventId.toString(), pendingChannelResult)
@@ -441,7 +440,7 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
 
     private fun deleteExistingReminders(contentResolver: ContentResolver?, eventId: Long) {
         val cursor = CalendarContract.Reminders.query(contentResolver, eventId, arrayOf(
-          CalendarContract.Reminders._ID
+                CalendarContract.Reminders._ID
         ))
         while (cursor != null && cursor.moveToNext()) {
             var reminderUri: Uri? = null
@@ -617,13 +616,13 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
                 put(CalendarContract.Attendees.ATTENDEE_NAME, it.name)
                 put(CalendarContract.Attendees.ATTENDEE_EMAIL, it.emailAddress)
                 put(
-                  CalendarContract.Attendees.ATTENDEE_RELATIONSHIP,
-                  CalendarContract.Attendees.RELATIONSHIP_ATTENDEE
+                        CalendarContract.Attendees.ATTENDEE_RELATIONSHIP,
+                        CalendarContract.Attendees.RELATIONSHIP_ATTENDEE
                 )
                 put(CalendarContract.Attendees.ATTENDEE_TYPE, it.role)
                 put(
-                  CalendarContract.Attendees.ATTENDEE_STATUS,
-                  CalendarContract.Attendees.ATTENDEE_STATUS_INVITED
+                        CalendarContract.Attendees.ATTENDEE_STATUS,
+                        CalendarContract.Attendees.ATTENDEE_STATUS_INVITED
                 )
                 put(CalendarContract.Attendees.EVENT_ID, eventId)
             }
@@ -638,6 +637,15 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
         val selectionArgs = arrayOf(eventId.toString() + "", attendee.emailAddress)
         contentResolver?.delete(CalendarContract.Attendees.CONTENT_URI, selection, selectionArgs)
 
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun deleteAttendees(attendees: List<Attendee>, eventId: Long, contentResolver: ContentResolver?) {
+        for(attendee in attendees) {
+            val selection = "(" + CalendarContract.Attendees.EVENT_ID + " = ?) AND (" + CalendarContract.Attendees.ATTENDEE_EMAIL + " = ?)"
+            val selectionArgs = arrayOf(eventId.toString() + "", attendee.emailAddress)
+            contentResolver?.delete(CalendarContract.Attendees.CONTENT_URI, selection, selectionArgs)
+        }
     }
 
     fun deleteEvent(calendarId: String, eventId: String, pendingChannelResult: MethodChannel.Result, startDate: Long? = null, endDate: Long? = null, followingInstances: Boolean? = null) {
@@ -885,11 +893,11 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
         }
 
         return Attendee(
-          cursor.getString(ATTENDEE_EMAIL_INDEX),
-          cursor.getString(ATTENDEE_NAME_INDEX),
-          cursor.getInt(ATTENDEE_TYPE_INDEX),
-          cursor.getInt(ATTENDEE_STATUS_INDEX),
-          cursor.getInt(ATTENDEE_RELATIONSHIP_INDEX) == CalendarContract.Attendees.RELATIONSHIP_ORGANIZER)
+                cursor.getString(ATTENDEE_EMAIL_INDEX),
+                cursor.getString(ATTENDEE_NAME_INDEX),
+                cursor.getInt(ATTENDEE_TYPE_INDEX),
+                cursor.getInt(ATTENDEE_STATUS_INDEX),
+                cursor.getInt(ATTENDEE_RELATIONSHIP_INDEX) == CalendarContract.Attendees.RELATIONSHIP_ORGANIZER)
     }
 
     private fun parseReminderRow(cursor: Cursor?): Reminder? {
@@ -991,7 +999,7 @@ class CalendarDelegate : PluginRegistry.RequestPermissionsResultListener {
         }
 
         if (recurrenceRule.recurrenceFrequency == RecurrenceFrequency.WEEKLY ||
-            recurrenceRule.weekOfMonth != null && (recurrenceRule.recurrenceFrequency == RecurrenceFrequency.MONTHLY || recurrenceRule.recurrenceFrequency == RecurrenceFrequency.YEARLY)) {
+                recurrenceRule.weekOfMonth != null && (recurrenceRule.recurrenceFrequency == RecurrenceFrequency.MONTHLY || recurrenceRule.recurrenceFrequency == RecurrenceFrequency.YEARLY)) {
             rr.byDayPart = buildByDayPart(recurrenceRule)
         }
 

@@ -181,7 +181,7 @@ class DeviceCalendarPlugin {
     );
   }
 
-  /// Creates or updates an event
+  /// Creates or updates an event - ios only
   ///
   /// The `event` parameter specifies how event data should be saved into the calendar
   /// Always specify the [Event.calendarId], to inform the plugin in which calendar
@@ -207,7 +207,96 @@ class DeviceCalendarPlugin {
 
         _assertParameter(
           result,
-          !(event.allDay != true && ((event?.calendarId?.isEmpty ?? true) || event.start == null || event.end == null || event.start.isAfter(event.end))),
+          !(event.allDay != true &&
+              ((event?.calendarId?.isEmpty ?? true) ||
+                  event.start == null ||
+                  event.end == null ||
+                  event.start.isAfter(event.end))),
+          ErrorCodes.invalidArguments,
+          ErrorMessages.createOrUpdateEventInvalidArgumentsMessage,
+        );
+      },
+      arguments: () => event.toJson(),
+    );
+  }
+
+  /// Create an event - android only
+  ///
+  /// The `event` parameter specifies how event data should be saved into the calendar
+  /// Always specify the [Event.calendarId], to inform the plugin in which calendar
+  /// it should create or update the event.
+  ///
+  /// Returns a [Result] with the newly created or update [Event.eventId]
+  Future<Result<String>> createEvent(Event event) async {
+    return _invokeChannelMethod(
+      ChannelConstants.methodNameCreateEvent,
+      assertParameters: (result) {
+        // Setting time to 0 for all day events
+        if (event.allDay == true) {
+          event.start = DateTime(event.start.year, event.start.month, event.start.day, 0, 0, 0);
+          event.end = DateTime(event.end.year, event.end.month, event.end.day, 0, 0, 0);
+        }
+
+        _assertParameter(
+          result,
+          !(event.allDay == true && (event?.calendarId?.isEmpty ?? true) || event.start == null || event.end == null),
+          ErrorCodes.invalidArguments,
+          ErrorMessages.createOrUpdateEventInvalidArgumentsMessageAllDay,
+        );
+
+        _assertParameter(
+          result,
+          !(event.allDay != true &&
+              ((event?.calendarId?.isEmpty ?? true) ||
+                  event.start == null ||
+                  event.end == null ||
+                  event.start.isAfter(event.end))),
+          ErrorCodes.invalidArguments,
+          ErrorMessages.createOrUpdateEventInvalidArgumentsMessage,
+        );
+      },
+      arguments: () => event.toJson(),
+    );
+  }
+
+  /// Create an event - android only
+  ///
+  /// The `event` parameter specifies how event data should be saved into the calendar
+  /// Always specify the [Event.calendarId], to inform the plugin in which calendar
+  /// it should create or update the event.
+  ///
+  /// Returns a [Result] with the newly created or update [Event.eventId]
+  Future<Result<String>> updateEvent(Event event) async {
+    return _invokeChannelMethod(
+      ChannelConstants.methodNameCreateEvent,
+      assertParameters: (result) {
+        _assertParameter(
+          result,
+          event.eventId != null,
+          ErrorCodes.invalidArguments,
+          ErrorMessages.updateEventInvalidArgumentsMessageEventId,
+        );
+
+        // Setting time to 0 for all day events
+        if (event.allDay == true) {
+          event.start = DateTime(event.start.year, event.start.month, event.start.day, 0, 0, 0);
+          event.end = DateTime(event.end.year, event.end.month, event.end.day, 0, 0, 0);
+        }
+
+        _assertParameter(
+          result,
+          !(event.allDay == true && (event?.calendarId?.isEmpty ?? true) || event.start == null || event.end == null),
+          ErrorCodes.invalidArguments,
+          ErrorMessages.createOrUpdateEventInvalidArgumentsMessageAllDay,
+        );
+
+        _assertParameter(
+          result,
+          !(event.allDay != true &&
+              ((event?.calendarId?.isEmpty ?? true) ||
+                  event.start == null ||
+                  event.end == null ||
+                  event.start.isAfter(event.end))),
           ErrorCodes.invalidArguments,
           ErrorMessages.createOrUpdateEventInvalidArgumentsMessage,
         );
@@ -255,7 +344,8 @@ class DeviceCalendarPlugin {
       arguments: () => <String, Object>{
         ChannelConstants.parameterNameCalendarName: calendarName,
         ChannelConstants.parameterNameCalendarColor: '0x${calendarColor.value.toRadixString(16)}',
-        ChannelConstants.parameterNameLocalAccountName: localAccountName?.isEmpty ?? true ? 'Device Calendar' : localAccountName
+        ChannelConstants.parameterNameLocalAccountName:
+            localAccountName?.isEmpty ?? true ? 'Device Calendar' : localAccountName
       },
     );
   }
